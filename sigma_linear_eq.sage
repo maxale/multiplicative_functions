@@ -4,6 +4,10 @@ __doc__ = f'''
 Solve linear equations in sigma(n) and n.
 Version {__version__} by Max Alekseyev <maxal@gwu.edu>
 
+Implementation of the algorithm proposed in the paper:
+* M. A. Alekseyev. "Computing bounded solutions to linear Diophantine equations with the sum of divisors".
+  https://arxiv.org/abs/2601.17832
+
 Brief history:
 * 20260124: First public release
 '''
