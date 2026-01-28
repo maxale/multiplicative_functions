@@ -278,6 +278,7 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
                 # round up suitable prime exponents to even
                 G *= type(G)( (p,int(e%2 and (p>2 or numdiv_%2))) for p,e in G )
                 g = G.value()
+                if g > UM: return res
 
             if omg_lb < len(G):
                 omg_lb = len(G)
