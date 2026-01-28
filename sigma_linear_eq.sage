@@ -9,7 +9,7 @@ Implementation of the algorithm proposed in the paper:
   arXiv:2601.17832 [math.NT] https://arxiv.org/abs/2601.17832
 
 Brief history:
-* 20260127: Minor bugfix; OEIS A391617 (abundance=54) included in the references
+* 20260127: Minor bugfix; OEIS A391615, A391617 included in the references
 * 20260124: First public release
 '''
 
@@ -73,6 +73,7 @@ refs_a1b2 = {           # a=1, b=2
     30: 'A389701',
     32: 'A175989',
     -32: 'A387352',
+    42: 'A391615',
     -42: 'A175730',
     54: 'A391617',
     -54: 'A101259',
