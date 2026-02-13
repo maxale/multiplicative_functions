@@ -46,18 +46,21 @@ A2: tau(n) = p1^e1 ... pk^ek, then bigomega(n) >= e1*(p1-1) + ... + ek*(pk-1).
 We also need:
 '''
 
-# Tests if A005179(n), smallest number with exactly n divisors, is <= U.
 def a005179_atmost(n,U):
-    def mult_factors(n):
-        if is_pseudoprime(n):
-            return [(n, )]
-        c = set()
+    '''
+    Tests if A005179(n), smallest number with exactly n divisors, is <= U.
+    '''
+
+    def mult_factors(n, sum_bound = oo, low_d = 2):
+        if n==1: return [tuple()]
+        c = []
         for d in divisors(n):
-            if 1<d<n:
-                for a in mult_factors(n//d):
-                    c.add( tuple(sorted((d, )+a)) )
+            if d-1 > sum_bound: break
+            if d >= low_d:
+                c.extend( (d, )+a for a in mult_factors(n//d, sum_bound - d + 1, d) )
         return c
 
     if n==1: return 1 <= U
-    if max(prime_factors(n))-1 > log(U,2): return False            # shortcut
-    return min((prod(nth_prime(i)**(j-1) for i, j in enumerate(reversed(d), 1)) for d in mult_factors(n) if d[-1]<=log(U,2)), default=oo) <= U
+    l2 = U.exact_log(2)
+    if max(prime_factors(n))-1 > l2: return False            # shortcut
+    return any( prod(nth_prime(i)**(j-1) for i, j in enumerate(reversed(d), 1)) <= U for d in mult_factors(n, l2) )
