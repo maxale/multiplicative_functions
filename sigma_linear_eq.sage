@@ -1,4 +1,4 @@
-__version__ = 20260127
+__version__ = 20260707
 
 __doc__ = f'''
 Solve linear equations in sigma(n) and n.
@@ -9,6 +9,11 @@ Implementation of the algorithm proposed in the paper:
   arXiv:2601.17832 [math.NT] https://arxiv.org/abs/2601.17832
 
 Brief history:
+* 20260707: more accurate bounds for (Ap+B)(Aq+B); odd_sigma case uses square roots
+* 20260622: `numdiv` is taken into account in more places; fixed case with given `seeds` and coprime_to > 1
+* 20260307: Additional exit condition when a >= b (some speedup)
+* 20260220: Minor improvements
+* 20260203: Better decision on avoiding factoring (some speedup)
 * 20260127: Minor bugfix; OEIS A391615, A391617 included in the references
 * 20260124: First public release
 '''
@@ -28,6 +33,40 @@ proof.arithmetic(False)
 
 # to support case b=0; https://raw.githubusercontent.com/maxale/gpscripts/refs/heads/main/invphi.gp
 gp.read("invphi.gp")
+gp(f"default(nbthreads,{N_CPU})")
+
+# Using modular arithmetic (introduced in 20260707) is affected by PARI/GP multiprocessing issue https://github.com/sagemath/sage/issues/36370
+# Hence, we avoid using Sage's `Mod()` machinery with PARI/GP backbone, and rely on SymPy, GAP, or Magma instead
+
+MOD_ENGINE = 'gap'            # 'magma' or 'gap' or 'sympy'
+
+if MOD_ENGINE == 'magma':
+    print('WARNING: using Magma engine for modular roots')
+    all_mod_roots = lambda res, mod: eval( magma.eval(f"R := ResidueClassRing({str(mod)}); AllSquareRoots(R!{str(res)});") )
+    is_mod_square = lambda res, mod: eval( magma.eval(f"R := ResidueClassRing({str(mod)}); IsSquare(R!{str(res)});").split()[0] )
+elif MOD_ENGINE == 'gap':
+    print('WARNING: using GAP engine for modular roots')
+    all_mod_roots = lambda res, mod: gap(f"RootsMod({str(res)},{str(mod)})").sage()     # Note: using gap.RootsMod() crashes
+    is_mod_square = lambda res, mod: gap(f"RootMod({str(res)},{str(mod)})<>fail").sage()
+else:   # default is 'sympy'
+    print('WARNING: using SymPy engine for modular roots')
+    from sympy.ntheory import sqrt_mod, is_quad_residue
+    all_mod_roots = lambda res, mod: sqrt_mod(res,mod,all_roots=True)
+    is_mod_square = lambda res, mod: is_quad_residue(res,mod)
+
+'''
+sage: %time res_solve_sigma_abc(1,2,1,10^50)
+
+Magma: 
+Wall time: 7.05 s
+
+GAP:
+Wall time: 15.7 s
+
+SymPy:
+Wall time: 17.7 s
+'''
+
 
 ####################################### Reference sequences
 
@@ -117,7 +156,7 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
     * 'squarefree=True' solves in squarefree numbers only
     * 'coprime_to=m' compute only solutions coprime to m
     * 'even_only=True' compute only even solutions
-    * `seeds=` if specified, uses them instead of computing seeds
+    * `seeds=` if specified, uses them instead of computing seeds; may have different a,b,c,omega,bigomega,numdiv but the same other parameters
     * `seeds_only=True` - returns seeds rather than solutions
     * 'omega=w' or `omega=(w_L, w_U)` compute only solutions with omega(n) = w or w_L <= omega(n) <= w_U
     * 'bigomega=W' or `bigomega=(W_L, W_U)` compute only solutions with bigomega(n) = W or W_L <= bigomega(n) <= W_U
@@ -169,8 +208,8 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
 
         # for prime p, a*sigma(p) - b*p - c = (a-b)*p + (a-c)
         if a==b==c:
-            if (Omg_lb <= 1 <= omg_ub):
-                print(f'WARNING: {t} is skipped; solutions are given by {str(M)+" * " if M>1 else ""}p for any prime p{" > "+str(mp-1) if mp>2 else ""}{"" if M==1 or max(prime_factors(M))<mp else " not from "+str(prime_factors(M))}.')
+            if (Omg_lb <= 1 <= omg_ub) and aux.get('numdiv',2)==2:
+                print(f'\nWARNING: {t} is skipped; solutions are given by {str(M)+" * " if M>1 else ""}p for any prime p{" > "+str(mp-1) if mp>2 else ""}{"" if M==1 or max(prime_factors(M))<mp else " not from "+str(prime_factors(M))}.')
             return None
 
         # for n >= 2 and a>=b,  c = a*sigma(n) - b*n >= a*(n+1) - b*n = (a-b)*n + a >= 3*a - 2*b
@@ -180,11 +219,11 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
         if refs:
             if a==1 and b==2 and refs_a1b2.get(c,refs)!=refs:
                 M_ = M//coprime_to
-                print(f'WARNING: {t} is skipped; solutions are given by {str(M_)+" * " if M_>1 else ""}terms of {refs_a1b2[c]}{"" if M==1 else " and coprime to "+" * ".join(map(str,prime_factors(M)))}.')
+                print(f'\nWARNING: {t} is skipped; solutions are given by {str(M_)+" * " if M_>1 else ""}terms of {refs_a1b2[c]}{"" if M==1 else " and coprime to "+" * ".join(map(str,prime_factors(M)))}.')
                 return None
             if b!=1 and refs_ac.get((a,c),refs)!=refs:
                 M_ = M//coprime_to
-                print(f'WARNING: {t} is skipped; solutions are given by {str(M_)+" * " if M_>1 else ""}terms of {refs_ac[(a,c)]} with ratio {b}{"" if M==1 else " and coprime to "+" * ".join(map(str,prime_factors(M)))}.')
+                print(f'\nWARNING: {t} is skipped; solutions are given by {str(M_)+" * " if M_>1 else ""}terms of {refs_ac[(a,c)]} with ratio {b}{"" if M==1 else " and coprime to "+" * ".join(map(str,prime_factors(M)))}.')
                 return None
 
         if M*mp > U and a != b+c:       # when M*mp > U, the only possible solution is 1.
@@ -252,9 +291,14 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
             If min_prime = 2, n may be a square, or twice a square, or just an even non-square (when b is odd).
         '''
 
-        if odd_sigma and min_prime>2:           # implying that n is a square
+        if odd_sigma and (min_prime>2 or numdiv_%2):           # implying that n is a square
+
+            # ADDED 20260707
+            if a*a > UM: return res             # delegate further processing to proc()
+            if not is_mod_square(-c*b,a): return res
+
             if Omg_lb%2 or Omg_lb < omg_lb*2:
-                # if n is odd, each odd prime must come in even power  ==>  bigomega(n) is even, and we can round Omg_lb up to an even number
+                # if n is a square, each prime factor must come in even power  ==>  bigomega(n) is even, and we can round Omg_lb up to an even number
                 Omg_lb = max(Omg_lb + Omg_lb%2, omg_lb*2)
                 aux_['bigomega'] = None              # just to make sure 'bigomega' is present in aux_; value will be overwritten later
             if Omg_ub < oo:
@@ -337,6 +381,8 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
 
         while True:
 
+            # print(P,(omg_lb,omg_ub),(Omg_lb,Omg_ub),UM)
+
             '''
                 We assume that omega(n) = len(P).
                 Then 
@@ -363,25 +409,49 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
                             aux_['omega'] = (omg_lb-1, omg_ub-1)        # update/add 'omega' to aux_ with better bounds
                     if omg_lb > omg_ub or Omg_lb > Omg_ub: return res
 
+
+            '''
+                Note that the lower bound for n is
+                P[0]^p_exp * (prod_P/P[0])^o_exp * P[0]^(Omg_lb - p_exp - (len(P)-1)*o_exp)
+                = prod_P^o_exp * P[0]^(Omg_lb - len(P)*o_exp)
+                where Omg_lb - p_exp - (len(P)-1)*o_exp is guaranteed to be >= 0.
+            '''
+
+            assert Omg_lb >= p_exp + (len(P)-1)*o_exp
+
+            LM = prod_P^o_exp * P[0]^(Omg_lb - len(P)*o_exp)
+
+            # ADDED 20260307
+            if a >= b:
+                r = UM.nth_root(Omg_lb,True)[0]                 # r >= spf(n)
+                if r*r > LM: r = LM.isqrt()
+                '''
+                Note that simga(n)
+                    >= n + n/spf(n) + spf(n) + 1 >= n + n/r + r + 1  if r <= sqrt(LM) <= sqrt(n);
+                    >= n + n/sqrt(n) + sqrt(n) + 1 otherwise.
+                '''
+                if (a-b)*LM + LM//r + r + 1 > c: return res
+
             # filling P
-            while len(P) < omg_lb or a * prod_pp1 <= b + (c/UM if c >= 0 else c/prod_P^o_exp/P[0]^(Omg_lb - len(P)*o_exp)):
-                if len(P) >= omg_ub: return res
-                if p_exp + len(P)*o_exp > Omg_ub: return res        # wheel exit
-                P.append( next(gen_next_prime) )
-                if len(P) > omg_lb:
-                    omg_lb = len(P)
+            while len(P) < omg_lb or a * prod_pp1 <= b + (c/UM if c >= 0 else c/LM):
+                if len(P)+1 > omg_lb:
+                    omg_lb = len(P)+1
                     if omg_lb > omg_ub: return res              # wheel exit
-                    Omg_lb = max(Omg_lb, p_exp + (omg_lb-1) * o_exp)
-                    if Omg_lb > Omg_ub: return res              # wheel exit
+                    if (t := p_exp + (omg_lb-1) * o_exp) > Omg_lb:
+                        if t > Omg_ub: return res              # wheel exit
+                        LM *= P[0]^(t-Omg_lb)
+                        Omg_lb = t
                     # we add 'omega' to aux_ unconditionally here, since it may save time in proc()
                     aux_['omega'] = (omg_lb-1, omg_ub-1)
+                P.append( next(gen_next_prime) )
                 prod_P *= P[-1]
-                if prod_P^o_exp * P[0]^(Omg_lb - len(P)*o_exp) > UM: return res         # wheel exit
+                LM *= (P[-1]/P[0])^o_exp
+                if LM > UM: return res                          # wheel exit
                 prod_pp1 *= P[-1]/(P[-1]-1)
 
-            assert len(P) == omg_lb
+            # assert len(P) == omg_lb
 
-            p = P.popleft()             # candidate for the smallest prime
+            p = P.popleft()             # candidate for the smallest prime factor of n
 
             # assert len(P) == omg_lb - 1
 
@@ -411,12 +481,19 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
                 if numdiv_: aux_['numdiv'] = numdiv_//(q_exp+1)
                 if (z := reduce_abc( (a*s_q, b*q, c, M*q, (P[0] if P else p+1), aux_) )) is None: continue
 
+                # We replace p/(p-1) bound for sigma(q)/q with the actual value s_q / q, and check if it fits the prime wheel:
                 prod_qq1 = prod_pp1 * s_q / q
-                prod_Q = prod_P^p_exp * q
+                prod_Q = q * prod_P^o_exp                       # changed p_exp -> o_exp 20260220
                 r = P[-1] if P else p
+                omg = 1 + len(P)
+                Omg = q_exp + len(P)*o_exp
                 while a * prod_qq1 <= b + (c/UM if c >= 0 else c/prod_Q):
+                    omg += 1
+                    if omg > omg_ub: break
+                    Omg += o_exp
+                    if Omg > Omg_ub: break
                     r = next_prime(r)
-                    prod_Q *= r^p_exp
+                    prod_Q *= r^o_exp
                     if prod_Q > UM: break
                     prod_qq1 *= r/(r-1)
                 else:
@@ -431,7 +508,9 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
     if omega in ZZ:     omega = (omega,)*2
     if bigomega in ZZ:  bigomega = (bigomega,)*2
 
-    f_proc_w = lambda x: (x_ for x_ in f_proc(x) if (omega is None or omega[0] <= len(factor(x_)) <= omega[1]) and (bigomega is None or bigomega[0] <= sum(k for _,k in factor(x_)) <= bigomega[1]))
+    f_proc_w = lambda x: ( x_ for x_ in f_proc(x) if (omega is None or omega[0] <= len(factor(x_)) <= omega[1]) 
+                                                and (bigomega is None or bigomega[0] <= sum(k for _,k in factor(x_)) <= bigomega[1]) 
+                                                and (numdiv==0 or number_of_divisors(x_)==numdiv) )
 
     min_prime = 2
 
@@ -468,15 +547,16 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
                 if a==b: sol.update( f_proc_w(1) )
                 return sol
 
-        if coprime_to > 1:
-            # since M is multiplied by coprime_to, we do so for U
-            if verbose >= 1:
-                print(f'Searching via multiples of {coprime_to} upto {coprime_to} * {U} = {U*coprime_to}')
-            U *= coprime_to
-
+    # this should be done whether `seeds` are given or computed
+    if coprime_to > 1:
+        # since M is multiplied by coprime_to, we do so for U
         if verbose >= 1:
-            print('===========\t',a,b,c,U)
+            print(f'Searching via multiples of {coprime_to} upto {coprime_to} * {U} = {U*coprime_to}')
+        U *= coprime_to
 
+    if seeds is None:
+        if verbose >= 2:
+            print('===========\t',a,b,c,U)
 
         aux = {}
         if omega is not None: aux['omega'] = omega
@@ -503,7 +583,7 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
     sol.update( t for s in seeds if s[0]==s[1]+s[2] for t in f_proc_w(s[3]//coprime_to) )
 
     if verbose >= 1:
-        if sol: print(f'Initial solutions:', sol)
+        if sol: print(f'Initial solutions:', sorted(sol))
         print('Seeds:',len(seeds))
 
     if not seeds:
@@ -526,7 +606,8 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
             res.add(M//coprime_to)
         '''
 
-        if min_prime > U//M: return res
+        UM = U//M
+        if min_prime > UM: return res
 
         omg_lb, omg_ub = aux.get('omega',(0,oo))
         Omg_lb, Omg_ub = aux.get('bigomega',(0,oo))
@@ -537,6 +618,20 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
         #print('Omega:', Omg_lb, Omg_ub)
 
         numdiv_ = aux.get('numdiv',0)
+
+        # ADDED 20260707
+        # odd_sigma = (a%2 and (b+c)%2) or numdiv_%2      # True means "if n is odd, then sigma(n) is odd and n is a square"
+        if ((a%2 and (b+c)%2 and min_prime>2) or numdiv_%2) and a*a > UM:
+
+            for t in all_mod_roots((-c/b)%a,a):
+                if t==0: t+=a
+                if strict and t^2 > UM: continue
+                if t==1 or gcd(M,t)>1: continue
+                f = list(factor(t))
+                if f[0][0] < min_prime: continue
+                if omg_lb <= len(f) <= omg_ub and Omg_lb <= sum(2*e for _,e in f) <= Omg_ub and (numdiv_==0 or numdiv_==prod(2*e+1 for _,e in f)) and a*prod((p^(2*e+1)-1)//(p-1) for p,e in f)==b*t^2+c:
+                    res.update( f_proc(M//coprime_to*t^2) )
+            return res
 
         # CASE (I): complementing with a prime power
         if not (omg_lb <= 1 <= omg_ub): pass
@@ -556,7 +651,10 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
                 C = (p-1)*c + a
                 if A==0:
                     if C==0:
-                        print(f'WARNING: Solution {M//coprime_to}*{p}^k for any k >= 1.')
+                        if numdiv_:
+                            res.update( f_proc(M//coprime_to*p^(numdiv_-1)) )
+                        else:
+                            print(f'\nWARNING: {t} has solution {M//coprime_to}*{p}^k for any k >= 1.')
                 elif C and C%A==0:
                     C //= A
                     k = valuation(C,p)
@@ -585,24 +683,49 @@ def res_solve_sigma_abc(a, b, c, U, refs=True, strict=True, squarefree=False,
                         if verbose >= 2:
                             print(f'{t} Case II solution {(p,q)} -> {M//coprime_to*p*q}', flush=True)
         else:
+            '''
+            # We have a*(p+1)*(q+1) = b*p*q + c
+            a_,b_,c_ = b-a, -a, a-c              # _a*p*q + _b*(p+q) = _c
+            if a_ < 0:
+                a_,b_,c_ = -a_, -b_, -c_
+            pq_sum_max = min_prime + UM // min_prime    # >= p + q
+            lhs_min = a_ * min_prime^2 + b_*(2*min_prime if b_>0 else pq_sum_max)
+            lhs_max = a_ * UM + b_*(pq_sum_max if b_>0 else 2*min_prime)
+            if lhs_min <= c_ <= lhs_max:
+            '''
+
             # Here we solve ((b-a)p-a)*((b-a)q-a) = a*(b+c) - b*c
             A = b - a
             B = -a
             C = a*(b+c) - b*c
             if A < 0:   A,B = -A,-B
 
-            # Here we solve (A*p + B) * (A*q + B) = C, where A > 0 and thus the l.h.s. is an increasing function for large enough p
-            if C==0:
-                if B%A==0 and is_pseudoprime(p:=-B//A) and M%p and p>=min_prime:
-                    print(f'WARNING: Solution {M//coprime_to*p}*p for any prime p not in {prime_divisors(M*p)}.')
-            elif (mAB := (A*min_prime + B < 0)) or (A*min_prime + B)^2 < C:  #or not strict:
-                for d in divisors(C):
-                    if d*d >= C:
-                        break
-                    if (d-B)%A==0 and is_pseudoprime(p:=(d-B)//A) and M%p and is_pseudoprime(q:=(C//d-B)//A) and M%q and min(p,q)>=min_prime:
-                        res.update( f_proc(M//coprime_to*p*q) )
-                    if mAB and (-d-B)%A==0 and is_pseudoprime(p:=(-d-B)//A) and M%p and is_pseudoprime(q:=(-C//d-B)//A) and M%q and min(p,q)>=min_prime:
-                        res.update( f_proc(M//coprime_to*p*q) )
+            # Here we solve (A*p + B) * (A*q + B) = C with A > 0
+
+            # CHANGED 20260707
+            if strict:
+                # lhs_min = (A*min_prime + B)^2 if B>=-A*min_prime else (A*min_prime+B)*(UM//min_prime*A+B)
+                lhs_min = (A*min_prime + B)^2 if B>=-A*min_prime else A^2 * UM + A*B*min_prime + A*B*UM//min_prime + B^2
+                # lhs_max = (A*min_prime+B)*(UM//min_prime*A+B) if B>=0 else (A*(r:=UM.isqrt())+B)*(UM//r*A+B)
+                lhs_max = A^2 * UM + A*B*min_prime + (A*B*UM+min_prime-1)//min_prime + B^2 if B>=0 \
+                     else A^2 * UM + 2*A*B*r + B^2 if 2*B>=-A*((r:=UM.isqrt())+min_prime) else (A*min_prime+B)^2
+            else:
+                lhs_min = (A*min_prime + B)^2 if B>=-A*min_prime else -oo
+                lhs_max = oo
+
+            if lhs_min <= C <= lhs_max:
+
+                if C==0:
+                    if B%A==0 and is_pseudoprime(p:=-B//A) and M%p and p>=min_prime:
+                        print(f'\nWARNING: {t} has solution {M//coprime_to*p}*p for any prime p not in {prime_divisors(M*p)}.')
+                else:   # elif (mAB := (A*min_prime + B < 0)) or (A*min_prime + B)^2 < C:
+                    for d in divisors(C):
+                        if d*d >= C:
+                            break
+                        if (d-B)%A==0 and is_pseudoprime(p:=(d-B)//A) and M%p and is_pseudoprime(q:=(C//d-B)//A) and M%q and min(p,q)>=min_prime:
+                            res.update( f_proc(M//coprime_to*p*q) )
+                        if (A*min_prime + B < 0) and (-d-B)%A==0 and is_pseudoprime(p:=(-d-B)//A) and M%p and is_pseudoprime(q:=(-C//d-B)//A) and M%q and min(p,q)>=min_prime:
+                            res.update( f_proc(M//coprime_to*p*q) )
 
         if verbose >= 1 and res:
             print(f'Solutions for {t}:', sorted(res), flush=True)
