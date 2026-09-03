@@ -46,7 +46,7 @@ A2: tau(n) = p1^e1 ... pk^ek, then bigomega(n) >= e1*(p1-1) + ... + ek*(pk-1).
 We also need:
 '''
 
-def a005179_atmost(n,U):
+def a005179_atmost(n,U,odd_only=False):
     '''
     Tests if A005179(n), smallest number with exactly n divisors, is <= U.
     '''
@@ -63,4 +63,5 @@ def a005179_atmost(n,U):
     if n==1: return 1 <= U
     l2 = U.exact_log(2)
     if max(prime_factors(n))-1 > l2: return False            # shortcut
-    return any( prod(nth_prime(i)**(j-1) for i, j in enumerate(reversed(d), 1)) <= U for d in mult_factors(n, l2) )
+    i0 = 2 if odd_only else 1
+    return any( prod(nth_prime(i0+i)**(j-1) for i, j in enumerate(reversed(d))) <= U for d in mult_factors(n, l2) )
