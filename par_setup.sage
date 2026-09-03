@@ -1,13 +1,13 @@
 import os, multiprocessing
 import sys, resource, ctypes, signal
 
-if os.environ["SAGE_NUM_THREADS"] == '1':
+if os.environ.get('SAGE_NUM_THREADS', '1') == '1':
     try:
         ncpu = N_CPU            # use N_CPU parameter if it's defined
     except NameError:
         ncpu = multiprocessing.cpu_count()
     sys.stderr.write(f'WARNING: setting SAGE_NUM_THREADS = {ncpu}.\n')
-    os.environ["SAGE_NUM_THREADS"] = str(ncpu)
+    os.environ['SAGE_NUM_THREADS'] = str(ncpu)
 
 '''
 Fix for errors like:
